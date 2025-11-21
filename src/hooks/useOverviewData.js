@@ -44,12 +44,12 @@ export const useManagementData = (year) => {
         DEAL_STAGES_WON.includes(deal.STAGE_ID)
       );
 
+      const propertyTypeField = fields[FIELD_IDS.propertyType];
+      const propertyTypeItems = propertyTypeField?.items || propertyTypeField?.LIST || [];
+
       // 3. Create helper maps
-      const propertyTypeMap = new Map(
-        fields[FIELD_IDS.propertyType]?.items.map((item) => [
-          item.ID,
-          item.VALUE,
-        ]) || []
+       const propertyTypeMap = new Map(
+        propertyTypeItems.map((item) => [item.ID, item.VALUE])
       );
 
       // 4. Perform aggregations on ALL deals for charts and general data
@@ -165,10 +165,14 @@ export const useManagementData = (year) => {
         .sort((a, b) => b.value - a.value); // sort descending by count
 
       const propertyTypeSalesAgg = {};
-
       for (const deal of wonDeals) {
+        // Ensure numeric conversion is safe
         const price = parseFloat(deal.OPPORTUNITY) || 0;
+        
+        // Get the ID directly from the deal object using the ENV variable key
         const typeId = deal[FIELD_IDS.propertyType];
+        
+        // Lookup the label, or use the ID itself if map fails (for debugging), or "Unknown"
         const typeName = propertyTypeMap.get(typeId) || "Unknown";
 
         if (!propertyTypeSalesAgg[typeName]) {
@@ -179,11 +183,30 @@ export const useManagementData = (year) => {
         propertyTypeSalesAgg[typeName].value += price;
       }
 
-      const salesByPropertyType = Object.entries(propertyTypeSalesAgg)
+     const salesByPropertyType = Object.entries(propertyTypeSalesAgg)
         .map(([type, data]) => ({
           type,
           units: data.units,
           value: data.value,
+        }))
+        .sort((a, b) => b.value - a.value);
+
+        const devCommissionAgg = {};
+
+      for (const deal of wonDeals) {
+        const developer = deal[FIELD_IDS.developer] || "Unknown";
+        const commission = parseMoney(deal[FIELD_IDS.grossCommission]);
+
+        if (!devCommissionAgg[developer]) {
+            devCommissionAgg[developer] = 0;
+        }
+        devCommissionAgg[developer] += commission;
+      }
+
+      const developerCommissionData = Object.entries(devCommissionAgg)
+        .map(([developer, value]) => ({
+          developer,
+          value,
         }))
         .sort((a, b) => b.value - a.value);
 
@@ -200,6 +223,7 @@ export const useManagementData = (year) => {
         developersData,
         leadSourceData,
         salesByPropertyType,
+        developerCommissionData
       };
     },
   });

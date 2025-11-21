@@ -36,8 +36,10 @@ const formatCurrency = (value) => {
 export function UnifiedOverviewPage() {
   const [year, setYear] = useState(new Date().getFullYear().toString());
   const [selectedDeveloper, setSelectedDeveloper] = useState("All");
+  const [currentDevCommPage, setCurrentDevCommPage] = useState(1);
+  const DEV_COMM_PAGE_SIZE = 8;
   const PAGE_SIZE = 10;
-  const LEAD_PAGE_SIZE = 9; 
+  const LEAD_PAGE_SIZE = 9;
   const [currentPage, setCurrentPage] = useState(1);
   const [currentLeadPage, setCurrentLeadPage] = useState(1);
 
@@ -46,7 +48,7 @@ export function UnifiedOverviewPage() {
   }, [year, selectedDeveloper]);
 
   const { data, isLoading, isError, error } = useManagementData(year);
-  console.log("data",data)
+  console.log("data", data);
 
   const wonDealsColumns = [
     { header: "Month", key: "month" },
@@ -80,29 +82,48 @@ export function UnifiedOverviewPage() {
     },
   ];
 
- const leadSourceHeaders = [
-    { 
-      header: "Lead Source", 
+  const leadSourceHeaders = [
+    {
+      header: "Lead Source",
       key: "name",
       render: (name, row, index) => (
         <div className="flex items-center gap-2">
-          <div 
-            className="w-3 h-3 rounded-full" 
-            style={{ 
-              backgroundColor: index < MGMT_CHART_COLORS.length 
-                ? MGMT_CHART_COLORS[index] 
-                : TOKENS.primary 
-            }} 
+          <div
+            className="w-3 h-3 rounded-full"
+            style={{
+              backgroundColor:
+                index < MGMT_CHART_COLORS.length
+                  ? MGMT_CHART_COLORS[index]
+                  : TOKENS.primary,
+            }}
           />
           {name}
         </div>
-      )
+      ),
     },
-    { header: "Value (AED)", key: "value", render: formatCurrency }, 
+    { header: "Value (AED)", key: "value", render: formatCurrency },
   ];
   // --- FIX END ---
+  const propertyTypeColumns = [
+    { header: "Type", key: "type" },
+    { header: "Units", key: "units" },
+    { header: "Value (AED)", key: "value", render: formatCurrency },
+  ];
 
   const MGMT_CHART_COLORS = ["#003366", "#3b82f6", "#60a5fa"];
+
+
+ const devCommColumns = [
+    { header: "Developer", key: "developer" },
+    { header: "Gross Comm (AED)", key: "value", render: formatCurrency },
+  ];
+
+  const devCommData = data?.developerCommissionData || [];
+  const totalDevCommPages = Math.max(1, Math.ceil(devCommData.length / DEV_COMM_PAGE_SIZE));
+  const paginatedDevCommData = devCommData.slice(
+    (currentDevCommPage - 1) * DEV_COMM_PAGE_SIZE,
+    currentDevCommPage * DEV_COMM_PAGE_SIZE
+  );
 
   // Handle loading and error states
   if (isLoading) {
@@ -137,7 +158,10 @@ export function UnifiedOverviewPage() {
   );
 
   const leadData = data?.leadSourceData || [];
-  const totalLeadPages = Math.max(1, Math.ceil(leadData.length / LEAD_PAGE_SIZE));
+  const totalLeadPages = Math.max(
+    1,
+    Math.ceil(leadData.length / LEAD_PAGE_SIZE)
+  );
   const paginatedLeadData = leadData.slice(
     (currentLeadPage - 1) * LEAD_PAGE_SIZE,
     currentLeadPage * LEAD_PAGE_SIZE
@@ -319,17 +343,16 @@ export function UnifiedOverviewPage() {
         </CardBody>
       </Card>
 
-       <Card>
+      <Card>
         <CardHeader title="Transaction Breakdown Per Lead Source" />
         <CardBody>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
             {/* Left: Bar Chart */}
             <div style={{ width: "100%", height: 450 }}>
               <ResponsiveContainer>
                 <BarChart
                   // --- FIX: Change 'leadData' to 'paginatedLeadData' to sync with table ---
-                  data={paginatedLeadData} 
+                  data={paginatedLeadData}
                   layout="vertical"
                   margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
                 >
@@ -398,6 +421,152 @@ export function UnifiedOverviewPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </CardBody>
+      </Card>
+      <Card>
+  <CardHeader title="Sales by Property Type" />
+  <CardBody>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
+      
+      {/* Donut Chart */}
+      <div style={{ width: "100%", height: 300 }}>
+        <ResponsiveContainer>
+          <PieChart>
+            <Pie
+              data={data?.salesByPropertyType || []}
+              dataKey="value"
+              nameKey="type"
+              cx="50%"
+              cy="50%"
+              innerRadius={60} // Donut style
+              outerRadius={80}
+              paddingAngle={5}
+            >
+              {(data?.salesByPropertyType || []).map((entry, index) => (
+                <Cell 
+                  key={`cell-${index}`} 
+                  fill={CHART_COLORS[index % CHART_COLORS.length]} 
+                />
+              ))}
+            </Pie>
+            <Tooltip formatter={(value) => formatCurrency(value)} />
+            {/* Custom Legend to match your image: "Type  Units" */}
+            <Legend 
+              layout="vertical" 
+              verticalAlign="middle" 
+              align="right"
+              formatter={(value, entry) => {
+                  const item = data.salesByPropertyType.find(d => d.type === value);
+                  return <span className="text-xs font-medium ml-2">{value} <span className="font-bold text-gray-900 ml-2">{item?.units}</span></span>;
+              }} 
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Table */}
+      <div>
+        <Table 
+          columns={propertyTypeColumns} 
+          data={data?.salesByPropertyType || []} 
+        />
+      </div>
+
+    </div>
+  </CardBody>
+</Card>
+
+<Card>
+        <CardHeader title="Developer vs Gross Comm" />
+        <CardBody>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Left: Bar Chart */}
+            <div style={{ width: "100%", height: 450 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={paginatedDevCommData}
+                  layout="vertical"
+                  margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis 
+                    type="number" 
+                    hide={false}
+                    tickFormatter={(val) => val >= 1000000 ? `${(val/1000000).toFixed(1)}M` : val >= 1000 ? `${(val/1000).toFixed(0)}k` : val}
+                    tick={{ fontSize: 12, fill: TOKENS.muted }}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="developer"
+                    width={140}
+                    tick={{ fontSize: 12, fill: TOKENS.text }}
+                    interval={0}
+                  />
+                  <Tooltip cursor={{ fill: "transparent" }} formatter={(val) => formatCurrency(val)} />
+                  <Bar 
+                    dataKey="value" 
+                    name="Gross Comm"
+                    radius={[0, 4, 4, 0]} 
+                    barSize={24}
+                  >
+                    {paginatedDevCommData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        // Alternate colors: Dark Blue, Light Blue
+                        fill={index % 2 === 0 ? "#003366" : "#60a5fa"} 
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Right: Table with Pagination */}
+            <div className="flex flex-col justify-between">
+              <div>
+                <Table columns={devCommColumns} data={paginatedDevCommData} />
+              </div>
+
+              <div
+                className="flex items-center justify-between mt-4 border-t pt-4"
+                style={{ borderColor: TOKENS.border }}
+              >
+                <button
+                  onClick={() => setCurrentDevCommPage((p) => Math.max(1, p - 1))}
+                  disabled={currentDevCommPage === 1}
+                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-gray-50"
+                  style={{
+                    border: `1px solid ${TOKENS.border}`,
+                    color: currentDevCommPage === 1 ? TOKENS.muted : TOKENS.text,
+                    opacity: currentDevCommPage === 1 ? 0.5 : 1,
+                    cursor: currentDevCommPage === 1 ? "not-allowed" : "pointer"
+                  }}
+                >
+                  &lt; Previous
+                </button>
+
+                <span className="text-sm" style={{ color: TOKENS.muted }}>
+                  Page {currentDevCommPage} of {totalDevCommPages}
+                </span>
+
+                <button
+                  onClick={() => setCurrentDevCommPage((p) => Math.min(totalDevCommPages, p + 1))}
+                  disabled={currentDevCommPage === totalDevCommPages}
+                  className="px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-gray-50"
+                  style={{
+                    border: `1px solid ${TOKENS.border}`,
+                    color: currentDevCommPage === totalDevCommPages ? TOKENS.muted : TOKENS.text,
+                    opacity: currentDevCommPage === totalDevCommPages ? 0.5 : 1,
+                    cursor: currentDevCommPage === totalDevCommPages ? "not-allowed" : "pointer"
+                  }}
+                >
+                  Next &gt;
+                </button>
+              </div>
+            </div>
+
           </div>
         </CardBody>
       </Card>
