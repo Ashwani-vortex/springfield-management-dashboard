@@ -1,13 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDealFields, getDealsByYear, getStatusList } from "../api/bitrix";
+import { getDealFields, getDealsByYear, getStatusList, getAllUsers } from "../api/bitrix"; 
 
-// Helper function to safely parse money fields like "95595.52|AED"
 const parseMoney = (moneyString) => {
   if (!moneyString || typeof moneyString !== "string") return 0;
   return parseFloat(moneyString.split("|")[0]) || 0;
 };
 
-// Get field IDs from environment variables
 const FIELD_IDS = {
   developer: import.meta.env.VITE_FIELD_DEVELOPER_NAME,
   grossCommission: import.meta.env.VITE_FIELD_GROSS_COMMISSION,
@@ -15,6 +13,7 @@ const FIELD_IDS = {
   paymentReceived: import.meta.env.VITE_FIELD_PAYMENT_RECEIVED,
   propertyType: import.meta.env.VITE_FIELD_PROPERTY_TYPE,
   amountReceivable: import.meta.env.VITE_FIELD_AMOUNT_RECEIVABLE,
+  agentName: import.meta.env.VITE_FIELD_AGENT_NAME,
 };
 
 const DEAL_STAGES_WON = [
@@ -24,91 +23,116 @@ const DEAL_STAGES_WON = [
   import.meta.env.VITE_DEAL_STAGE_ID_C5WON,
 ].filter(Boolean);
 
-/**
- * Custom hook to fetch and process all data for the Management Dashboard.
- * @param {string} year The financial year selected by the user.
- */
 export const useManagementData = (year) => {
   return useQuery({
     queryKey: ["managementData", year],
     queryFn: async () => {
-      // 1. Fetch raw data in parallel for efficiency
-      const [fields, allDeals, statuses] = await Promise.all([
+      // 1. Fetch Data
+      const [fields, allDeals, statuses, users] = await Promise.all([
         getDealFields(),
         getDealsByYear(year),
         getStatusList(),
+        getAllUsers(), 
       ]);
 
-      // 2. **CHANGE**: Filter for 'won' deals by checking against the array of WON stages.
+      // Create User Map (ID -> Name)
+      const userMap = new Map();
+      const agentSalesAgg = {}; // Initialize aggregation object
+
+      // --- FIX: Pre-fill Agent List with ALL Active Users ---
+      users.forEach(u => {
+        const fullName = `${u.NAME} ${u.LAST_NAME}`.trim() || u.EMAIL;
+        userMap.set(u.ID, fullName);
+        // Initialize every agent with 0 sales so they appear in the list
+        agentSalesAgg[fullName] = 0; 
+      });
+
       const wonDeals = allDeals.filter((deal) =>
         DEAL_STAGES_WON.includes(deal.STAGE_ID)
       );
 
+      // Maps
       const propertyTypeField = fields[FIELD_IDS.propertyType];
       const propertyTypeItems = propertyTypeField?.items || propertyTypeField?.LIST || [];
-
-      // 3. Create helper maps
-       const propertyTypeMap = new Map(
+      const propertyTypeMap = new Map(
         propertyTypeItems.map((item) => [item.ID, item.VALUE])
       );
 
-      // 4. Perform aggregations on ALL deals for charts and general data
-      const allDevelopers = [
-        ...new Set(allDeals.map((d) => d[FIELD_IDS.developer]).filter(Boolean)),
-      ];
+      // Aggregators
       const propertyTypesAgg = {};
-      const developersAgg = {};
+      const developersAgg = {}; 
       const leadSourceAgg = {};
 
+      // --- Loop 1: All Deals ---
       for (const deal of allDeals) {
         const propertyPrice = parseFloat(deal.OPPORTUNITY) || 0;
         const developer = deal[FIELD_IDS.developer] || "Unknown";
+        const typeId = deal[FIELD_IDS.propertyType];
+        const typeName = propertyTypeMap.get(typeId) || "Unknown";
+        const leadSource = deal.SOURCE_ID || "Unknown";
 
-        // Aggregate property types
-        const propertyTypeId = deal[FIELD_IDS.propertyType];
-        const propertyTypeName =
-          propertyTypeMap.get(propertyTypeId) || "Unknown";
-        propertyTypesAgg[propertyTypeName] =
-          (propertyTypesAgg[propertyTypeName] || 0) + 1;
+        propertyTypesAgg[typeName] = (propertyTypesAgg[typeName] || 0) + 1;
 
-        // Aggregate developer data
-        if (!developersAgg[developer]) {
-          developersAgg[developer] = { totalValue: 0 };
-        }
+        if (!developersAgg[developer]) developersAgg[developer] = { totalValue: 0 };
         developersAgg[developer].totalValue += propertyPrice;
 
-        // Aggregate lead source data
-        const leadSource = deal.SOURCE_ID || "Unknown";
         leadSourceAgg[leadSource] = (leadSourceAgg[leadSource] || 0) + 1;
       }
 
-      // 5. Perform financial calculations and monthly breakdown on WON deals only
+      // --- Loop 2: Won Deals ---
       const monthlyDataAgg = {};
       let totalGrossCommission = 0;
       let totalNetCommission = 0;
+      
+      const devCommissionAgg = {}; 
+      const devUnitsAgg = {};
+      const propertyTypeSalesAgg = {}; 
+      // agentSalesAgg is already initialized above
 
       for (const deal of wonDeals) {
         const grossCommission = parseMoney(deal[FIELD_IDS.grossCommission]);
         const netCommission = parseMoney(deal[FIELD_IDS.netCommission]);
         const paymentReceived = parseMoney(deal[FIELD_IDS.paymentReceived]);
         const propertyPrice = parseFloat(deal.OPPORTUNITY) || 0;
-        const amountReceivable =
-          parseFloat(deal[FIELD_IDS.amountReceivable]) || 0;
+        const amountReceivable = parseFloat(deal[FIELD_IDS.amountReceivable]) || 0;
+        const developer = deal[FIELD_IDS.developer] || "Unknown";
+        
+        // --- AGENT NAME LOGIC ---
+        let agentName = deal[FIELD_IDS.agentName];
+        
+        if (!agentName || !isNaN(agentName)) {
+             const assignedId = deal.ASSIGNED_BY_ID;
+             agentName = userMap.get(assignedId) || "Unknown Agent";
+        }
+        
+        if (Array.isArray(agentName)) {
+            agentName = agentName[0];
+        }
 
         totalGrossCommission += grossCommission;
         totalNetCommission += netCommission;
 
-        const month = new Date(deal.CLOSEDATE).toLocaleString("default", {
-          month: "long",
-        });
+        if (!devCommissionAgg[developer]) devCommissionAgg[developer] = 0;
+        devCommissionAgg[developer] += grossCommission;
+
+        if (!devUnitsAgg[developer]) devUnitsAgg[developer] = 0;
+        devUnitsAgg[developer] += 1;
+
+        const typeId = deal[FIELD_IDS.propertyType];
+        const typeName = propertyTypeMap.get(typeId) || "Unknown";
+        if (!propertyTypeSalesAgg[typeName]) propertyTypeSalesAgg[typeName] = { units: 0, value: 0 };
+        propertyTypeSalesAgg[typeName].units += 1;
+        propertyTypeSalesAgg[typeName].value += propertyPrice;
+
+        // --- AGENT SALES AGGREGATION ---
+        // Ensure we handle case where agent name coming from deal isn't in our initial list
+        if (agentSalesAgg[agentName] === undefined) agentSalesAgg[agentName] = 0;
+        agentSalesAgg[agentName] += propertyPrice;
+
+        const month = new Date(deal.CLOSEDATE).toLocaleString("default", { month: "long" });
         if (!monthlyDataAgg[month]) {
           monthlyDataAgg[month] = {
-            dealsWon: 0,
-            propertyPrice: 0,
-            grossCommission: 0,
-            netCommission: 0,
-            paymentReceived: 0,
-            amountReceivable: 0,
+            dealsWon: 0, propertyPrice: 0, grossCommission: 0, netCommission: 0, paymentReceived: 0, amountReceivable: 0,
           };
         }
         monthlyDataAgg[month].dealsWon++;
@@ -119,95 +143,42 @@ export const useManagementData = (year) => {
         monthlyDataAgg[month].amountReceivable += amountReceivable;
       }
 
-      // 6. Format all aggregated data for the UI
-      const totalPropertyValueAllDeals = Object.values(developersAgg).reduce(
-        (sum, dev) => sum + dev.totalValue,
-        0
-      );
-      const totalDealsByMonth = Object.entries(monthlyDataAgg).map(
-        ([month, data]) => ({ month, ...data })
-      );
-      const propertyTypesData = Object.entries(propertyTypesAgg).map(
-        ([name, value]) => ({ name, value })
-      );
-      const developersData = Object.entries(developersAgg).map(
-        ([developer, data]) => ({
-          developer,
-          value: data.totalValue,
-          percentage:
-            totalPropertyValueAllDeals > 0
-              ? ((data.totalValue / totalPropertyValueAllDeals) * 100).toFixed(
-                  2
-                )
-              : 0,
-        })
-      );
-      // Build maps for source lookups (try both STATUS_ID and numeric ID)
-      const statusMapByStatusId = new Map(
-        (statuses || []).map((s) => [String(s.STATUS_ID), s.NAME])
-      );
-      const statusMapById = new Map(
-        (statuses || []).map((s) => [String(s.ID), s.NAME])
-      );
+      // Formatting
+      const totalPropertyValueAllDeals = Object.values(developersAgg).reduce((sum, dev) => sum + dev.totalValue, 0);
+      const totalDealsByMonth = Object.entries(monthlyDataAgg).map(([month, data]) => ({ month, ...data }));
+      const propertyTypesData = Object.entries(propertyTypesAgg).map(([name, value]) => ({ name, value }));
+      
+      const developersData = Object.entries(developersAgg).map(([developer, data]) => ({
+        developer,
+        value: data.totalValue,
+        percentage: totalPropertyValueAllDeals > 0 ? ((data.totalValue / totalPropertyValueAllDeals) * 100).toFixed(2) : 0,
+      }));
 
-      // Convert leadSourceAgg (which uses whatever value was in deal.SOURCE_ID) to named data
-      const leadSourceData = Object.entries(leadSourceAgg)
-        .map(([sourceId, value]) => {
-          const key = String(sourceId);
-          // Prefer STATUS_ID lookup, then numeric ID, then fallback to the original id string
-          const name =
-            statusMapByStatusId.get(key) ||
-            statusMapById.get(key) ||
-            key ||
-            "Unknown";
-          return { name, value, id: sourceId };
-        })
-        .sort((a, b) => b.value - a.value); // sort descending by count
+      const statusMapByStatusId = new Map((statuses || []).map((s) => [String(s.STATUS_ID), s.NAME]));
+      const statusMapById = new Map((statuses || []).map((s) => [String(s.ID), s.NAME]));
+      const leadSourceData = Object.entries(leadSourceAgg).map(([sourceId, value]) => ({
+          name: statusMapByStatusId.get(String(sourceId)) || statusMapById.get(String(sourceId)) || String(sourceId) || "Unknown",
+          value, id: sourceId 
+      })).sort((a, b) => b.value - a.value);
 
-      const propertyTypeSalesAgg = {};
-      for (const deal of wonDeals) {
-        // Ensure numeric conversion is safe
-        const price = parseFloat(deal.OPPORTUNITY) || 0;
-        
-        // Get the ID directly from the deal object using the ENV variable key
-        const typeId = deal[FIELD_IDS.propertyType];
-        
-        // Lookup the label, or use the ID itself if map fails (for debugging), or "Unknown"
-        const typeName = propertyTypeMap.get(typeId) || "Unknown";
+      const salesByPropertyType = Object.entries(propertyTypeSalesAgg).map(([type, data]) => ({
+        type, units: data.units, value: data.value,
+      })).sort((a, b) => b.value - a.value);
 
-        if (!propertyTypeSalesAgg[typeName]) {
-          propertyTypeSalesAgg[typeName] = { units: 0, value: 0 };
-        }
+      const developerCommissionData = Object.entries(devCommissionAgg).map(([developer, value]) => ({
+          developer, value 
+      })).sort((a, b) => b.value - a.value);
 
-        propertyTypeSalesAgg[typeName].units += 1;
-        propertyTypeSalesAgg[typeName].value += price;
-      }
+      const developerUnitsData = Object.entries(devUnitsAgg).map(([developer, value]) => ({
+          developer, value 
+      })).sort((a, b) => b.value - a.value);
 
-     const salesByPropertyType = Object.entries(propertyTypeSalesAgg)
-        .map(([type, data]) => ({
-          type,
-          units: data.units,
-          value: data.value,
+      const salesByAgentData = Object.entries(agentSalesAgg)
+        .map(([agent, value]) => ({
+          agent, value 
         }))
-        .sort((a, b) => b.value - a.value);
-
-        const devCommissionAgg = {};
-
-      for (const deal of wonDeals) {
-        const developer = deal[FIELD_IDS.developer] || "Unknown";
-        const commission = parseMoney(deal[FIELD_IDS.grossCommission]);
-
-        if (!devCommissionAgg[developer]) {
-            devCommissionAgg[developer] = 0;
-        }
-        devCommissionAgg[developer] += commission;
-      }
-
-      const developerCommissionData = Object.entries(devCommissionAgg)
-        .map(([developer, value]) => ({
-          developer,
-          value,
-        }))
+        // Filter out "Unknown Agent" if you want clean data, or keep it to see unassigned deals
+        .filter(item => item.agent !== "Unknown Agent") 
         .sort((a, b) => b.value - a.value);
 
       return {
@@ -217,13 +188,15 @@ export const useManagementData = (year) => {
           grossCommission: totalGrossCommission,
           netCommission: totalNetCommission,
         },
-        allDevelopers,
+        allDevelopers: [...new Set(allDeals.map((d) => d[FIELD_IDS.developer]).filter(Boolean))],
         totalDealsByMonth,
         propertyTypesData,
         developersData,
         leadSourceData,
         salesByPropertyType,
-        developerCommissionData
+        developerCommissionData,
+        developerUnitsData,
+        salesByAgentData,
       };
     },
   });
