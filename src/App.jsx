@@ -107,13 +107,13 @@ function Dashboard() {
           <div className="flex items-center gap-2">
             <div
               className="w-9 h-9 rounded-xl flex items-center justify-center font-bold"
-              style={{ backgroundColor: TOKENS.primary, color: TOKENS.white }}
+              style={{ backgroundColor: "#003366", color: TOKENS.white }}
             >
-              VW
+              RE
             </div>
             <div>
               <div className="text-sm" style={{ color: TOKENS.muted }}>
-                VortexWeb
+                Springfield Properties
               </div>
               <div
                 className="text-base font-semibold"
@@ -126,11 +126,11 @@ function Dashboard() {
           <div className="flex-1" />
           <div className="hidden md:flex items-center gap-2">
             <div className="relative">
-              <Search
+              {/* <Search
                 size={16}
                 className="absolute left-3 top-2.5"
                 style={{ color: TOKENS.muted }}
-              />
+              /> */}
               <Input
                 className="pl-8 w-72"
                 placeholder="Search agents, listings, leads…"
